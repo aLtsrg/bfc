@@ -1,7 +1,7 @@
 .PHONY: clean
 
 CXX := c++
-CXXFLAGS := -Wall -Wextra -Wpedantic -Wconversion -ggdb
+CXXFLAGS := -std=c++20 -Wall -Wextra -Wpedantic -Wconversion -ggdb
 
 SRC := bf.cpp
 EXE := bf
