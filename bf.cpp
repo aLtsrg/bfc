@@ -2,6 +2,7 @@
 #include <fstream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 // read input line by line
 // could collect line numbers or other information here
@@ -20,6 +21,26 @@ std::string filter(std::string_view contents)
             result += c;
     }
     return result;
+}
+
+
+// TODO: add the mapping 
+bool bracketsBalanced(std::string_view code)
+{
+    std::vector<int> stack{};
+
+    for (const auto& c : code){
+        if (c == '['){
+            stack.push_back(c);
+        } else if (c == ']'){
+            if (stack.size() ==  0) return false;
+            stack.pop_back();
+        }
+    }
+
+    if (stack.size() > 0) return false;
+
+    return true;
 }
 
 int main(int argc, char *argv[])
@@ -46,6 +67,8 @@ int main(int argc, char *argv[])
 
     input = filter(input); 
     std::cout << "FILTERED: \n" << input << '\n';
+
+    std::cout  << bracketsBalanced(input) << '\n';
 
     return 0;
 }
