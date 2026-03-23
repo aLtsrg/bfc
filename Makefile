@@ -1,6 +1,6 @@
 .PHONY: clean
 
-CXX := c++
+CXX := g++-13
 CXXFLAGS := -std=c++20 -Wall -Wextra -Wpedantic -Wconversion -ggdb
 
 SRC := bf.cpp

@@ -7,6 +7,7 @@
 #include <vector>
 #include <unordered_map>
 #include <cassert>
+#include <format>
 
 enum class Op {
     Undefined, 
@@ -143,6 +144,42 @@ void printIR(std::vector<IREntry>& IR)
     std::cout << "]\n";
 }
 
+//TODO: map each IREntry to asm
+void translate(const std::vector<IREntry>& IR)
+{
+
+    // format example:
+    //     out << std::format("Hello {}\n", 69);
+    
+    // function should:
+    // go through IR generating asm per IREntry
+    // pass program name as argument -- only if not using system, otherwise its dangerous
+    
+    // header
+    std::ofstream out("a.s");
+    out << "bits 64\n"
+        << "default rel\n"
+        << "section .bss\n"
+        << "buf: resb 30000\n"
+        << "section .text\n"
+        << "global main\n"
+        << "main:\n";
+
+    //exit
+    out << "    mov rax, 60\n"
+        << "    xor rdi, rdi\n"
+        << "    syscall\n";
+
+    //dont forget to close
+    out.close();
+
+    // TEMPORARY
+    system("nasm -f elf64 -g -F dwarf a.s -o a.o");
+    system("g++ -g a.o -o a");
+    system("rm -rf a.o");
+
+}
+
 int main(int argc, char *argv[])
 {
     // TODO: check for too many arguments
@@ -178,6 +215,8 @@ int main(int argc, char *argv[])
     buildIR(IR, indexToLoopNumber, input);
     
     printIR(IR);
+
+    translate(IR);
 
 
     // TODO: build asm from IR
