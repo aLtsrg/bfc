@@ -253,6 +253,9 @@ void translate(const std::vector<IREntry>& IR)
                 << "    mov rdx, 1\n"
                 << "    syscall\n";
             break;
+        default:
+            std::cerr << "\033[1;31mERROR: \033[0m" << "UNREACHABLE CASE\n";
+            break;
         }
     }
 
