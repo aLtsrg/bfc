@@ -9,6 +9,19 @@
 #include <cassert>
 #include <format>
 
+
+
+//TODO: make more robust compand line argument system
+//          - learn how to use flags correctly
+//          - add -help
+//          - add -ir and -s for outputing steps
+//          - safely add -o
+//          - find replacement for std::system
+//      start implementing optimizations
+//          - constant folding 
+//          - cell reset detection [+], [-]
+//          - others
+
 enum class Op {
     Undefined, 
     AddCell, 
@@ -144,9 +157,12 @@ void printIR(std::vector<IREntry>& IR)
     std::cout << "]\n";
 }
 
-//TODO: map each IREntry to asm
+//TODO: works for some programs, test on more
+//      add pretty printing for the asm
 void translate(const std::vector<IREntry>& IR)
 {
+    //counter for label generation
+    int counter{};
 
     // format example:
     //     out << std::format("Hello {}\n", 69);
@@ -162,13 +178,89 @@ void translate(const std::vector<IREntry>& IR)
         << "section .bss\n"
         << "buf: resb 30000\n"
         << "section .text\n"
-        << "global main\n"
-        << "main:\n";
+        << "global main\n\n"
+        << "main:\n"
+        << "    lea rbx, [buf]\n";
+
+
+    //simpler than I thought because I can directly modify the bytes
+    //otherwise I would have to keep a value register and load store
+    for (const auto& entry : IR){
+        switch (entry.op)
+        {
+        case Op::Undefined:
+            // maybe output a comment so I can see?
+            out << "    ;Undefined Entry\n";
+            break;
+        case Op::AddCell:
+            //is there a way to avoid emiting uneccesary labels?
+            out << std::format("    add byte [rbx], {}\n", entry.arg);
+            break;
+        case Op::SubCell:
+            out << std::format("    sub byte [rbx], {}\n", entry.arg);
+            break;
+        case Op::AddPtr:
+            //increment pointer, remember to wrap the 30000
+            out << std::format("    add rbx, {}\n", entry.arg)
+                << "    lea rcx, [buf]\n"
+                << "    mov rax, rbx\n"
+                << "    sub rax, rcx\n"
+                << "    cmp rax, 30000\n"
+                << std::format("    jle .done{}\n", counter)
+                << "    sub rbx, 30000\n"
+                << std::format("    .done{}:\n", counter);
+            ++counter;
+            break;
+        case Op::SubPtr:
+            out << std::format("    sub rbx, {}\n", entry.arg)
+                << "    lea rcx, [buf]\n"
+                << "    cmp rbx, rcx\n"
+                << std::format("    jge .done{}\n", counter)
+                << "    add rbx, 30000\n"
+                << std::format("    .done{}:\n", counter);
+            ++counter;
+            break;
+        case Op::LoopStart:
+            out << std::format("    loop_start{}:\n", entry.arg)
+                << "    cmp byte [rbx], 0\n"
+                << std::format("    je loop_end{}\n", entry.arg);
+            break;
+        case Op::LoopEnd:
+            out << "    cmp byte [rbx], 0\n"
+                << std::format("    jne loop_start{}\n", entry.arg)
+                << std::format("    loop_end{}:\n", entry.arg);
+            break;
+        case Op::Input:
+            //read syscall
+            //if read returns 1, perfect
+            //if read returns 0, store 0 in the cell
+            //if read returns -1, store 0 in the cell
+            out << "    mov rax, 0\n"
+                << "    mov rdi, 0\n"
+                << "    mov rsi, rbx\n"
+                << "    mov rdx, 1\n"
+                << "    syscall\n"
+                << "    cmp rax, 1\n"
+                << std::format("    je .done_input{}\n", counter)
+                << "    mov byte [rbx], 0\n"
+                << std::format("    .done_input{}:\n", counter); 
+            ++counter;
+            break;
+        case Op::Output:
+            out << "    mov rax, 1\n"
+                << "    mov rdi, 1\n"
+                << "    mov rsi, rbx\n"
+                << "    mov rdx, 1\n"
+                << "    syscall\n";
+            break;
+        }
+    }
 
     //exit
     out << "    mov rax, 60\n"
         << "    xor rdi, rdi\n"
-        << "    syscall\n";
+        << "    syscall\n"
+        << "\nsection .note.GNU-stack noalloc noexec nowrite progbits\n";
 
     //dont forget to close
     out.close();
