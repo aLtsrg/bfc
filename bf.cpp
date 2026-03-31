@@ -17,21 +17,19 @@
 //          - add -ir and -s for outputing steps
 //          - safely add -o
 //          - find replacement for std::system
-//      start implementing optimizations
-//          - constant folding 
-//          - cell reset detection [+], [-]
-//          - others
+//       implement more optimizations``
 
 enum class Op {
     Undefined, 
     AddCell, 
     SubCell, 
+    SetCell,
     AddPtr,
     SubPtr,
     LoopStart,
     LoopEnd,
     Output,
-    Input, 
+    Input,
 };
 
 struct IREntry {
@@ -97,20 +95,50 @@ void printMap(std::unordered_map<int, int> map)
 void buildIR(std::vector<IREntry>& IR, std::unordered_map<int, int>& idxToLpNbr, std::string_view code)
 {
     int idx{};
+    int cellCounter{};
+    int pointCounter{};
+
     for ( const auto& c : code ){
+
+        // =============================== run merging ===================================
+        // maybe factor out into functions
+        // treating it this way makes it so if the operations cancel eachother out, no IR is emitted
+        if (c != '+' && c != '-' && cellCounter != 0){
+            if (cellCounter > 0){
+                IR.push_back({Op::AddCell, cellCounter});
+            } else {
+                IR.push_back({Op::SubCell, -cellCounter});
+            }
+            cellCounter = 0;
+        }
+
+        if (c != '<' && c != '>' && pointCounter != 0){
+            if (pointCounter > 0){
+                IR.push_back({Op::AddPtr, pointCounter});
+            } else {
+                IR.push_back({Op::SubPtr, -pointCounter});
+            }
+            pointCounter = 0;
+        }
+        // =============================== run merging ===================================
+
         switch (c)
         {
         case '+':
-            IR.push_back({Op::AddCell, 1});
+            //IR.push_back({Op::AddCell, 1});
+            ++cellCounter;
             break;
         case '-':
-            IR.push_back({Op::SubCell, 1});
+            //IR.push_back({Op::SubCell, 1});
+            --cellCounter;
             break;
         case '>':
-            IR.push_back({Op::AddPtr, 1});
+            //IR.push_back({Op::AddPtr, 1});
+            ++pointCounter;
             break;
         case '<':
-            IR.push_back({Op::SubPtr, 1});
+            //IR.push_back({Op::SubPtr, 1});
+            --pointCounter;
             break;
         case '[':
             assert(idxToLpNbr.contains(idx) && "bracket idx not in map");
@@ -134,6 +162,21 @@ void buildIR(std::vector<IREntry>& IR, std::unordered_map<int, int>& idxToLpNbr,
     }
 }
 
+//TODO: add more patterns?
+void peephole(std::vector<IREntry>& IR)
+{
+    //if adding more in future should not increment after erase
+    //could cause you to miss a pattern I guess?
+    for (size_t i{}; i < IR.size() - 2; ++i){
+        if (IR[i].op == Op::LoopStart
+                && ((IR[i+1].op == Op::AddCell && IR[i+1].arg == 1) || (IR[i+1].op == Op::SubCell && IR[i+1].arg == 1))
+                && IR[i+2].op == Op::LoopEnd){
+            IR[i] = {Op::SetCell, 0};
+            IR.erase(IR.begin() + i + 1, IR.begin() + i + 3);
+        }
+    }
+}
+
 void printIR(std::vector<IREntry>& IR)
 {
     int idx {};
@@ -144,6 +187,7 @@ void printIR(std::vector<IREntry>& IR)
         if (entry.op == Op::Undefined) opString = "Undefined";
         if (entry.op == Op::AddCell) opString = "AddCell";
         if (entry.op == Op::SubCell) opString = "SubCell";
+        if (entry.op == Op::SetCell) opString = "Set";
         if (entry.op == Op::AddPtr) opString = "AddPtr";
         if (entry.op == Op::SubPtr) opString = "SubPtr";
         if (entry.op == Op::LoopStart) opString = "LoopStart";
@@ -157,12 +201,23 @@ void printIR(std::vector<IREntry>& IR)
     std::cout << "]\n";
 }
 
+// helper for pretty printing the asm
+// not sure how I feel about this, is it even useful?
+// maybe expand into an indented output stream class
+std::string indent(size_t level)
+{
+    return std::string(level, '\t');
+}
+
 //TODO: works for some programs, test on more
 //      add pretty printing for the asm
 void translate(const std::vector<IREntry>& IR)
 {
     //counter for label generation
     int counter{};
+
+    //indentation level for pretty printing
+    size_t level{ 1 };
 
     // format example:
     //     out << std::format("Hello {}\n", 69);
@@ -180,7 +235,7 @@ void translate(const std::vector<IREntry>& IR)
         << "section .text\n"
         << "global main\n\n"
         << "main:\n"
-        << "    lea rbx, [buf]\n";
+        << indent(level) << "lea rbx, [buf]\n";
 
 
     //simpler than I thought because I can directly modify the bytes
@@ -190,68 +245,74 @@ void translate(const std::vector<IREntry>& IR)
         {
         case Op::Undefined:
             // maybe output a comment so I can see?
-            out << "    ;Undefined Entry\n";
+            out << indent(level) << ";Undefined Entry\n";
             break;
         case Op::AddCell:
             //is there a way to avoid emiting uneccesary labels?
-            out << std::format("    add byte [rbx], {}\n", entry.arg);
+            out << indent(level) << std::format("add byte [rbx], {}\n", entry.arg);
             break;
         case Op::SubCell:
-            out << std::format("    sub byte [rbx], {}\n", entry.arg);
+            out << indent(level) << std::format("sub byte [rbx], {}\n", entry.arg);
+            break;
+        case Op::SetCell:
+            //will this ever not be 0?
+            out << indent(level) << std::format("mov byte [rbx], {}\n", entry.arg);
             break;
         case Op::AddPtr:
             //increment pointer, remember to wrap the 30000
-            out << std::format("    add rbx, {}\n", entry.arg)
-                << "    lea rcx, [buf]\n"
-                << "    mov rax, rbx\n"
-                << "    sub rax, rcx\n"
-                << "    cmp rax, 30000\n"
-                << std::format("    jle .done{}\n", counter)
-                << "    sub rbx, 30000\n"
-                << std::format("    .done{}:\n", counter);
+            out << indent(level) << std::format("add rbx, {}\n", entry.arg)
+                << indent(level) << "lea rcx, [buf]\n"
+                << indent(level) << "mov rax, rbx\n"
+                << indent(level) << "sub rax, rcx\n"
+                << indent(level) << "cmp rax, 30000\n"
+                << indent(level) << std::format("jle .done{}\n", counter)
+                << indent(level) << "sub rbx, 30000\n"
+                << indent(level) << std::format(".done{}:\n", counter);
             ++counter;
             break;
         case Op::SubPtr:
-            out << std::format("    sub rbx, {}\n", entry.arg)
-                << "    lea rcx, [buf]\n"
-                << "    cmp rbx, rcx\n"
-                << std::format("    jge .done{}\n", counter)
-                << "    add rbx, 30000\n"
-                << std::format("    .done{}:\n", counter);
+            out << indent(level) << std::format("sub rbx, {}\n", entry.arg)
+                << indent(level) << "lea rcx, [buf]\n"
+                << indent(level) << "cmp rbx, rcx\n"
+                << indent(level) << std::format("jge .done{}\n", counter)
+                << indent(level) << "add rbx, 30000\n"
+                << indent(level) << std::format(".done{}:\n", counter);
             ++counter;
             break;
         case Op::LoopStart:
-            out << std::format("    loop_start{}:\n", entry.arg)
-                << "    cmp byte [rbx], 0\n"
-                << std::format("    je loop_end{}\n", entry.arg);
+            out << indent(level) << std::format("loop_start{}:\n", entry.arg);
+            ++level;
+            out << indent(level) << "cmp byte [rbx], 0\n"
+                << indent(level) << std::format("je loop_end{}\n", entry.arg);
             break;
         case Op::LoopEnd:
-            out << "    cmp byte [rbx], 0\n"
-                << std::format("    jne loop_start{}\n", entry.arg)
-                << std::format("    loop_end{}:\n", entry.arg);
+            out << indent(level) << "cmp byte [rbx], 0\n"
+                << indent(level) << std::format("jne loop_start{}\n", entry.arg);
+            --level;
+            out << indent(level) << std::format("loop_end{}:\n", entry.arg);
             break;
         case Op::Input:
             //read syscall
             //if read returns 1, perfect
             //if read returns 0, store 0 in the cell
             //if read returns -1, store 0 in the cell
-            out << "    mov rax, 0\n"
-                << "    mov rdi, 0\n"
-                << "    mov rsi, rbx\n"
-                << "    mov rdx, 1\n"
-                << "    syscall\n"
-                << "    cmp rax, 1\n"
-                << std::format("    je .done_input{}\n", counter)
-                << "    mov byte [rbx], 0\n"
-                << std::format("    .done_input{}:\n", counter); 
+            out << indent(level) << "mov rax, 0\n"
+                << indent(level) << "mov rdi, 0\n"
+                << indent(level) << "mov rsi, rbx\n"
+                << indent(level) << "mov rdx, 1\n"
+                << indent(level) << "syscall\n"
+                << indent(level) << "cmp rax, 1\n"
+                << indent(level) << std::format("je .done_input{}\n", counter)
+                << indent(level) << "mov byte [rbx], 0\n"
+                << indent(level) << std::format(".done_input{}:\n", counter); 
             ++counter;
             break;
         case Op::Output:
-            out << "    mov rax, 1\n"
-                << "    mov rdi, 1\n"
-                << "    mov rsi, rbx\n"
-                << "    mov rdx, 1\n"
-                << "    syscall\n";
+            out << indent(level) << "mov rax, 1\n"
+                << indent(level) << "mov rdi, 1\n"
+                << indent(level) << "mov rsi, rbx\n"
+                << indent(level) << "mov rdx, 1\n"
+                << indent(level) << "syscall\n";
             break;
         default:
             std::cerr << "\033[1;31mERROR: \033[0m" << "UNREACHABLE CASE\n";
@@ -260,10 +321,10 @@ void translate(const std::vector<IREntry>& IR)
     }
 
     //exit
-    out << "    mov rax, 60\n"
-        << "    xor rdi, rdi\n"
-        << "    syscall\n"
-        << "\nsection .note.GNU-stack noalloc noexec nowrite progbits\n";
+    out << indent(level) << "mov rax, 60\n"
+        << indent(level) << "xor rdi, rdi\n"
+        << indent(level) << "syscall\n"
+        << indent(level) << "\nsection .note.GNU-stack noalloc noexec nowrite progbits\n";
 
     //dont forget to close
     out.close();
@@ -303,18 +364,19 @@ int main(int argc, char *argv[])
     std::unordered_map<int, int> indexToLoopNumber{};
     if (!validateAndMapBrackets(input, indexToLoopNumber)){
         std::cerr << "\033[1;31mSYNTAX ERROR: \033[0m" << "brackets not balanced\n";
-        return 0;
+        return 1;
     }
 
     std::vector<IREntry> IR{};
     buildIR(IR, indexToLoopNumber, input);
     
+    peephole(IR);
+    
     printIR(IR);
 
     translate(IR);
 
-
-    // TODO: build asm from IR
+    //TODO: implement more permanent compilation pipeline
 
     return 0;
 }
