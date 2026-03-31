@@ -3,10 +3,10 @@
 CXX := g++-13
 CXXFLAGS := -std=c++20 -Wall -Wextra -Wpedantic -Wconversion -ggdb
 
-SRC := bf.cpp
-EXE := bf
+SRC := bfc.cpp
+EXE := bfc
 
-bf : bf.cpp
+$(EXE) : $(SRC)
 	$(CXX) $(CXXFLAGS) $(SRC) -o $(EXE)
 
 clean :
