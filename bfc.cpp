@@ -2,22 +2,19 @@
 
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
 #include <unordered_map>
 #include <cassert>
 #include <format>
+#include <unistd.h>
+#include <sys/wait.h>
 
 
-
-//TODO: make more robust compand line argument system
-//          - learn how to use flags correctly
-//          - add -help
-//          - add -ir and -s for outputing steps
-//          - safely add -o
-//          - find replacement for std::system
-//       implement more optimizations``
+//TODO: find more optimizations
+//      add LLVM IR backend
 
 enum class Op {
     Undefined, 
@@ -37,24 +34,35 @@ struct IREntry {
     int arg {};
 };
 
+struct Options {
+    std::string inputFile{};
+    std::string outputFile      { "a.out" };
+    std::string asmPath         { "a.s" };
+    std::string objPath         { "a.o" };
+    std::string irPath          { "a.ir" };
+    bool emitIR  { false };
+    bool emitASM { false };
+    bool debug   { false };
+};
+
 // read input line by line
 // could put other information here like line number etc.
 // TODO: can this error? if so make it bool and return if error.
-void readSourceFile(std::ifstream& bfFile, std::string& outputString)
+void readSourceFile(std::ifstream& bfFile, std::string& inputString)
 {
     for (std::string line; std::getline(bfFile >> std::ws, line);)
-        outputString += line + "\n";
+        inputString += line + "\n";
 }
 
-std::string filter(std::string_view contents)
+void filter(std::string& inputString)
 {
     std::string result{};
-    for (const auto& c : contents){
+    for (const auto& c : inputString){
         if ( c == '+' || c == '-'|| c == '>' || c == '<' 
                 || c == '[' || c == ']' || c == '.' || c == ',' )
             result += c;
     }
-    return result;
+    inputString = result;
 }
 
 
@@ -177,11 +185,11 @@ void peephole(std::vector<IREntry>& IR)
     }
 }
 
-void printIR(std::vector<IREntry>& IR)
+void emitIR(std::vector<IREntry>& IR, std::string irPath)
 {
     int idx {};
     std::string opString {};
-    std::cout << "[\n";
+    std::ofstream out(irPath);
     for(const auto& entry : IR){
         
         if (entry.op == Op::Undefined) opString = "Undefined";
@@ -195,10 +203,9 @@ void printIR(std::vector<IREntry>& IR)
         if (entry.op == Op::Output) opString = "Output";
         if (entry.op == Op::Input) opString = "Input";
         
-        std::cout << idx << ": " << opString << ',' << entry.arg << '\n';
+        out << idx << ": " << opString << ',' << entry.arg << '\n';
         ++idx;
     }
-    std::cout << "]\n";
 }
 
 // helper for pretty printing the asm
@@ -211,7 +218,7 @@ std::string indent(size_t level)
 
 //TODO: works for some programs, test on more
 //      add pretty printing for the asm
-void translate(const std::vector<IREntry>& IR)
+void translate(const std::vector<IREntry>& IR, std::ostream& out)
 {
     //counter for label generation
     int counter{};
@@ -224,10 +231,8 @@ void translate(const std::vector<IREntry>& IR)
     
     // function should:
     // go through IR generating asm per IREntry
-    // pass program name as argument -- only if not using system, otherwise its dangerous
     
     // header
-    std::ofstream out("a.s");
     out << "bits 64\n"
         << "default rel\n"
         << "section .bss\n"
@@ -325,42 +330,176 @@ void translate(const std::vector<IREntry>& IR)
         << indent(level) << "xor rdi, rdi\n"
         << indent(level) << "syscall\n"
         << indent(level) << "\nsection .note.GNU-stack noalloc noexec nowrite progbits\n";
+}
 
-    //dont forget to close
-    out.close();
+void emitASM(std::string_view asmString, const std::string& asmPath)
+{
+    //no need to close manually closes when funciton returns
+    std::ofstream out(asmPath);
+    out << asmString;
+}
 
-    // TEMPORARY
-    system("nasm -f elf64 -g -F dwarf a.s -o a.o");
-    system("g++ -g a.o -o a");
-    system("rm -rf a.o");
+//TODO: add error checking
+void run(const std::vector<const char*>& args)
+{
+    pid_t pid = fork();
 
+    if(pid ==  0){
+        std::vector<char*> argv{};
+        argv.reserve(args.size() + 1);
+
+        for (auto s : args){
+            argv.push_back(const_cast<char*>(s));
+        }
+        argv.push_back(nullptr);
+
+        execvp(argv[0], argv.data());
+
+        //make error more useful
+        perror("execvp failed");
+        _exit(1);
+    }
+
+    waitpid(pid, nullptr, 0);
+}
+
+void assembleASM(const Options& options)
+{
+    if(options.debug){
+        run({"nasm",
+             "-f", "elf64",
+             "-g", "-F", "dwarf",
+             options.asmPath.c_str(), 
+             "-o",
+             options.objPath.c_str()});
+    } else {
+        run({"nasm",
+             "-f", "elf64",
+             options.asmPath.c_str(), 
+             "-o",
+             options.objPath.c_str()});
+    }
+}
+
+void link(const Options& options)
+{
+    if(options.debug){
+        run({"g++",
+             "-ggdb",
+             options.objPath.c_str(), 
+             "-o",
+             options.outputFile.c_str()});
+    } else {
+        run({"g++",
+             options.objPath.c_str(), 
+             "-o",
+             options.outputFile.c_str()});
+    }
+}
+
+void cleanUp(const Options& options)
+{
+    if(!options.emitIR){
+        run({"rm",
+             "-rf",
+             options.irPath.c_str() });
+    }
+    if(!options.emitASM && !options.debug){
+        run({"rm",
+             "-rf",
+             options.asmPath.c_str() });
+    }
+    run({"rm", "-rf", options.objPath.c_str() });
 }
 
 int main(int argc, char *argv[])
 {
-    // TODO: check for too many arguments
-    // TODO: add --help flag, and -o output
-    if (argc < 2){
-        std::cerr << "\033[1;31mERROR: \033[0m" << "No file provided\n";
+
+    Options options{};
+    std::vector<std::string> positional{};
+
+    for(int i{1}; i < argc; ++i){
+        std::string_view arg {argv[i]};
+
+        if(arg.starts_with('-')){
+            if(arg == "-h" || arg == "--help"){
+                std::cout << "  bfc - brainfuck compiler\n"
+                          << "  Usage:\n"
+                          << "    bfc [options] <input>\n\n"
+                          << "  Options:\n"
+                          << "    -h, --help                    shows this menu\n"
+                          << "    -o, --output FILENAME         set the name for the executable\n"
+                          << "    -i, --emit-ir                 emit the IR\n"
+                          << "    -a, --emit-asm                emit the NASM\n"
+                          << "    -g                            add debug information to build\n\n"
+                          << "  Examples:\n"
+                          << "    bfc hello.bf\n"
+                          << "    bfc hello.bf -o hello\n";
+                exit(0);
+            }
+            else if (arg == "-o" || arg == "--output"){
+                //make sure we have a next argument and it is not a flag
+                if(++i < argc && !(argv[i][0] == '-')){
+                    std::string outName {argv[i]};
+                    size_t pos = outName.rfind('.');
+                    if(pos == std::string_view::npos || outName.substr(pos) == ".out"){
+                        options.outputFile = outName;
+                        options.asmPath = outName + ".s";
+                        options.objPath = outName + ".o";
+                        options.irPath  = outName + ".ir";
+                    } else {
+                        std::cerr << "\033[1;31mINCORRECT OUTPUT FILE TYPE PROVIDED\033[0m" << std::endl;
+                        return 1;
+                    }
+                } else {
+                    std::cerr << "\033[1;31mNO OUTPUT FILE PROVIDED\033[0m" << std::endl;
+                    return 1;
+                }
+            }
+            else if (arg == "-i" || arg == "--emit-ir"){
+                options.emitIR = true;
+            }
+            else if (arg == "-a" || arg == "--emit-asm"){
+                options.emitASM = true;
+            } 
+            else if (arg == "-g"){
+                options.debug = true;
+            }
+            else {
+                std::cerr << "\033[1;31mUNKNOWN FLAG: " << arg << "\033[0m" << std::endl;
+                return 1;
+            }
+        }
+        else {
+            //positional[0] should be the input file
+            positional.push_back(argv[i]);
+        }
+        
+    }
+
+    //add more checks if more positional arguments are added
+    if (positional.size() > 0 && positional[0].ends_with(".bf")){
+        options.inputFile = positional[0];
+    } else {
+        std::cerr << "\033[1;31mSOURCE FILE NOT PROVIDED: \033[1;33mtry `bfc --help`\033[0m"  << std::endl;
         return 1;
     }
 
-    std::string input;
-    std::string fileName{ argv[1] };
-    std::ifstream bfFile{ fileName };
-
-    if (!bfFile || !fileName.ends_with(".bf")){
-        std::cerr << "\033[1;31mERROR: \033[0m" << "File called \033[1;33m`" 
-            << argv[1] << "`\033[0m was not found or is of incorrect type\n";
+    //idk about this
+    std::string input{};
+    std::ifstream bfFile { options.inputFile };
+    if (!bfFile){
+        std::cerr << "\033[1;31mERROR: \033[0m" << "File called \033[1;33m`"
+            << options.inputFile << "`\033[0m was not found\n";
         return 1;
     }
-    
+
     readSourceFile(bfFile, input); 
     std::cout << "RAW INPUT: \n" << input << '\n';
 
-    input = filter(input); 
+    filter(input); 
     std::cout << "FILTERED: \n" << input << '\n';
-
+    
     std::unordered_map<int, int> indexToLoopNumber{};
     if (!validateAndMapBrackets(input, indexToLoopNumber)){
         std::cerr << "\033[1;31mSYNTAX ERROR: \033[0m" << "brackets not balanced\n";
@@ -369,14 +508,25 @@ int main(int argc, char *argv[])
 
     std::vector<IREntry> IR{};
     buildIR(IR, indexToLoopNumber, input);
-    
+
     peephole(IR);
     
-    printIR(IR);
+    emitIR(IR, options.irPath);
 
-    translate(IR);
+    //TODO: look into string streams more
+    std::ostringstream ss;
+    translate(IR, ss);
+    std::string asmString = ss.str();
 
-    //TODO: implement more permanent compilation pipeline
+    //for seperation
+    //if I add LLVM IR then this could also emit that
+    //would need to pass flag then too
+    emitASM(asmString, options.asmPath);
+    assembleASM(options);
+
+    link(options);
+
+    cleanUp(options);
 
     return 0;
 }
