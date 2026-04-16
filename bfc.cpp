@@ -175,7 +175,8 @@ void peephole(std::vector<IREntry>& IR)
 {
     //if adding more in future should not increment after erase
     //could cause you to miss a pattern I guess?
-    for (size_t i{}; i < IR.size() - 2; ++i){
+    //i + 2, because we want to check IR.size() - 2 but that could cause wrapping issues with size_t
+    for (size_t i{}; i + 2 < IR.size(); ++i){
         if (IR[i].op == Op::LoopStart
                 && ((IR[i+1].op == Op::AddCell && IR[i+1].arg == 1) || (IR[i+1].op == Op::SubCell && IR[i+1].arg == 1))
                 && IR[i+2].op == Op::LoopEnd){
@@ -448,11 +449,11 @@ int main(int argc, char *argv[])
                         options.objPath = outName + ".o";
                         options.irPath  = outName + ".ir";
                     } else {
-                        std::cerr << "\033[1;31mINCORRECT OUTPUT FILE TYPE PROVIDED\033[0m" << std::endl;
+                        std::cerr << "\033[1;31mERROR:\033[0m Incorrect output file type provided\033[0m" << std::endl;
                         return 1;
                     }
                 } else {
-                    std::cerr << "\033[1;31mNO OUTPUT FILE PROVIDED\033[0m" << std::endl;
+                    std::cerr << "\033[1;31mERROR:\033[0m No output file provided\033[0m" << std::endl;
                     return 1;
                 }
             }
@@ -466,7 +467,7 @@ int main(int argc, char *argv[])
                 options.debug = true;
             }
             else {
-                std::cerr << "\033[1;31mUNKNOWN FLAG: " << arg << "\033[0m" << std::endl;
+                std::cerr << "\033[1;31mERROR:\033[0m unknown flag \033[1;33m`" << arg << "`\033[0m" << std::endl;
                 return 1;
             }
         }
@@ -481,7 +482,7 @@ int main(int argc, char *argv[])
     if (positional.size() > 0 && positional[0].ends_with(".bf")){
         options.inputFile = positional[0];
     } else {
-        std::cerr << "\033[1;31mSOURCE FILE NOT PROVIDED: \033[1;33mtry `bfc --help`\033[0m"  << std::endl;
+        std::cerr << "\033[1;31mERROR:\033[0m Source file not provided, try: \033[1;33m`bfc --help`\033[0m"  << std::endl;
         return 1;
     }
 
@@ -495,10 +496,10 @@ int main(int argc, char *argv[])
     }
 
     readSourceFile(bfFile, input); 
-    std::cout << "RAW INPUT: \n" << input << '\n';
+    //std::cout << "RAW INPUT: \n" << input << '\n';
 
     filter(input); 
-    std::cout << "FILTERED: \n" << input << '\n';
+    //std::cout << "FILTERED: \n" << input << '\n';
     
     std::unordered_map<int, int> indexToLoopNumber{};
     if (!validateAndMapBrackets(input, indexToLoopNumber)){

@@ -12,7 +12,7 @@ $(EXE) : $(SRC)
 	$(CXX) $(CXXFLAGS) $(SRC) -o $(EXE)
 
 debug : $(SRC)
-	$(CXX) $(DEBUGFLAGS) $(SRC) -o $(EXE)
+	$(CXX) $(DEBUGFLAGS) $(SRC) -o $(EXE)-debug
 
 clean :
-	rm -rf $(EXE)
+	rm -rf $(EXE) $(EXE)-debug
