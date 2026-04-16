@@ -168,6 +168,10 @@ void buildIR(std::vector<IREntry>& IR, std::unordered_map<int, int>& idxToLpNbr,
         }
         ++idx;
     }
+
+    //NOTE: cellCounter and pointCounter are not flushed, meaning trailing +, -, <, >, are not accounted for in the IR
+    //      this is by design - these trailing characters do not have any observable impact on the program outputs.
+    //      (however, if run merging is done for '.' or ',' this WOULD have an observable impact, in that case counters should be flushed)
 }
 
 //TODO: add more patterns?
@@ -175,7 +179,7 @@ void peephole(std::vector<IREntry>& IR)
 {
     //if adding more in future should not increment after erase
     //could cause you to miss a pattern I guess?
-    //i + 2, because we want to check IR.size() - 2 but that could cause wrapping issues with size_t
+    //i + 2, because we want to check IR.size() - 2 but causes wrapping issues when the IR is too small
     for (size_t i{}; i + 2 < IR.size(); ++i){
         if (IR[i].op == Op::LoopStart
                 && ((IR[i+1].op == Op::AddCell && IR[i+1].arg == 1) || (IR[i+1].op == Op::SubCell && IR[i+1].arg == 1))
@@ -210,15 +214,12 @@ void emitIR(std::vector<IREntry>& IR, std::string irPath)
 }
 
 // helper for pretty printing the asm
-// not sure how I feel about this, is it even useful?
-// maybe expand into an indented output stream class
 std::string indent(size_t level)
 {
     return std::string(level, '\t');
 }
 
 //TODO: works for some programs, test on more
-//      add pretty printing for the asm
 void translate(const std::vector<IREntry>& IR, std::ostream& out)
 {
     //counter for label generation
@@ -251,10 +252,9 @@ void translate(const std::vector<IREntry>& IR, std::ostream& out)
         {
         case Op::Undefined:
             // maybe output a comment so I can see?
-            out << indent(level) << ";Undefined Entry\n";
+            out << indent(level * 2) << ";Undefined Entry\n";
             break;
         case Op::AddCell:
-            //is there a way to avoid emiting uneccesary labels?
             out << indent(level) << std::format("add byte [rbx], {}\n", entry.arg);
             break;
         case Op::SubCell:
@@ -335,7 +335,7 @@ void translate(const std::vector<IREntry>& IR, std::ostream& out)
 
 void emitASM(std::string_view asmString, const std::string& asmPath)
 {
-    //no need to close manually closes when funciton returns
+    //no need to close manually closes when function returns, only when needed before that
     std::ofstream out(asmPath);
     out << asmString;
 }

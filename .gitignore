@@ -1,3 +1,7 @@
 compile_commands.json
 .cache/
+bfc-debug
 bfc
+a.out
+a.ir
+a.s
