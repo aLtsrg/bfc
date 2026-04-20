@@ -15,6 +15,7 @@
 
 //TODO: find more optimizations
 //      add LLVM IR backend
+//      add tests
 
 enum class Op {
     Undefined, 
@@ -99,7 +100,6 @@ void printMap(std::unordered_map<int, int> map)
     std::cout << "]\n";
 }
 
-// TODO: maybe bool?
 void buildIR(std::vector<IREntry>& IR, std::unordered_map<int, int>& idxToLpNbr, std::string_view code)
 {
     int idx{};
@@ -219,7 +219,6 @@ std::string indent(size_t level)
     return std::string(level, '\t');
 }
 
-//TODO: works for some programs, test on more
 void translate(const std::vector<IREntry>& IR, std::ostream& out)
 {
     //counter for label generation
