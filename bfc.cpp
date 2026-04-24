@@ -1,5 +1,6 @@
 //#define NDEBUG
 
+#include <cstddef>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -11,6 +12,7 @@
 #include <format>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <filesystem> 
 
 
 //TODO: find more optimizations
@@ -18,7 +20,6 @@
 //      add tests
 
 enum class Op {
-    Undefined, 
     AddCell, 
     SubCell, 
     SetCell,
@@ -36,23 +37,21 @@ struct IREntry {
 };
 
 struct Options {
-    std::string inputFile{};
-    std::string outputFile      { "a.out" };
-    std::string asmPath         { "a.s" };
-    std::string objPath         { "a.o" };
-    std::string irPath          { "a.ir" };
+    std::string inputFile  {};
+    std::string outputFile { "a.out" };
+    std::string irPath     { "a.ir" };
+    std::string asmPath    { "a.s" };
+    std::string objPath    { "a.o" };
     bool emitIR  { false };
     bool emitASM { false };
     bool debug   { false };
 };
 
-// read input line by line
-// could put other information here like line number etc.
-// TODO: can this error? if so make it bool and return if error.
 void readSourceFile(std::ifstream& bfFile, std::string& inputString)
 {
-    for (std::string line; std::getline(bfFile >> std::ws, line);)
-        inputString += line + "\n";
+    std::stringstream buf;
+    buf << bfFile.rdbuf(); 
+    inputString = buf.str();
 }
 
 void filter(std::string& inputString)
@@ -91,15 +90,6 @@ bool validateAndMapBrackets(std::string_view code, std::unordered_map<int, int>&
     return true;
 }
 
-void printMap(std::unordered_map<int, int> map)
-{
-    std::cout << "[\n";
-    for(const auto& entry : map){
-        std::cout << "  ENTRY: "<< entry.first << ',' << entry.second << '\n';
-    }
-    std::cout << "]\n";
-}
-
 void buildIR(std::vector<IREntry>& IR, std::unordered_map<int, int>& idxToLpNbr, std::string_view code)
 {
     int idx{};
@@ -133,27 +123,29 @@ void buildIR(std::vector<IREntry>& IR, std::unordered_map<int, int>& idxToLpNbr,
         switch (c)
         {
         case '+':
-            //IR.push_back({Op::AddCell, 1});
             ++cellCounter;
             break;
         case '-':
-            //IR.push_back({Op::SubCell, 1});
             --cellCounter;
             break;
         case '>':
-            //IR.push_back({Op::AddPtr, 1});
             ++pointCounter;
             break;
         case '<':
-            //IR.push_back({Op::SubPtr, 1});
             --pointCounter;
             break;
         case '[':
-            assert(idxToLpNbr.contains(idx) && "bracket idx not in map");
+            if(!idxToLpNbr.contains(idx)){
+                std::cerr << "\033[1;31mERROR: \033[0m" << "missing idx to bracket mapping IR\n";
+                exit(1);
+            }
             IR.push_back({Op::LoopStart, idxToLpNbr[idx]});
             break;
         case ']':
-            assert(idxToLpNbr.contains(idx) && "bracket idx not in map");
+            if(!idxToLpNbr.contains(idx)){
+                std::cerr << "\033[1;31mERROR: \033[0m" << "missing idx to bracket mapping IR\n";
+                exit(1);
+            }
             IR.push_back({Op::LoopEnd, idxToLpNbr[idx]});
             break;
         case '.':
@@ -174,7 +166,7 @@ void buildIR(std::vector<IREntry>& IR, std::unordered_map<int, int>& idxToLpNbr,
     //      (however, if run merging is done for '.' or ',' this WOULD have an observable impact, in that case counters should be flushed)
 }
 
-//TODO: add more patterns?
+//TODO: add more patterns
 void peephole(std::vector<IREntry>& IR)
 {
     //if adding more in future should not increment after erase
@@ -197,7 +189,6 @@ void emitIR(std::vector<IREntry>& IR, std::string irPath)
     std::ofstream out(irPath);
     for(const auto& entry : IR){
         
-        if (entry.op == Op::Undefined) opString = "Undefined";
         if (entry.op == Op::AddCell) opString = "AddCell";
         if (entry.op == Op::SubCell) opString = "SubCell";
         if (entry.op == Op::SetCell) opString = "Set";
@@ -213,7 +204,6 @@ void emitIR(std::vector<IREntry>& IR, std::string irPath)
     }
 }
 
-// helper for pretty printing the asm
 std::string indent(size_t level)
 {
     return std::string(level, '\t');
@@ -227,12 +217,6 @@ void translate(const std::vector<IREntry>& IR, std::ostream& out)
     //indentation level for pretty printing
     size_t level{ 1 };
 
-    // format example:
-    //     out << std::format("Hello {}\n", 69);
-    
-    // function should:
-    // go through IR generating asm per IREntry
-    
     // header
     out << "bits 64\n"
         << "default rel\n"
@@ -244,15 +228,9 @@ void translate(const std::vector<IREntry>& IR, std::ostream& out)
         << indent(level) << "lea rbx, [buf]\n";
 
 
-    //simpler than I thought because I can directly modify the bytes
-    //otherwise I would have to keep a value register and load store
     for (const auto& entry : IR){
         switch (entry.op)
         {
-        case Op::Undefined:
-            // maybe output a comment so I can see?
-            out << indent(level * 2) << ";Undefined Entry\n";
-            break;
         case Op::AddCell:
             out << indent(level) << std::format("add byte [rbx], {}\n", entry.arg);
             break;
@@ -260,7 +238,6 @@ void translate(const std::vector<IREntry>& IR, std::ostream& out)
             out << indent(level) << std::format("sub byte [rbx], {}\n", entry.arg);
             break;
         case Op::SetCell:
-            //will this ever not be 0?
             out << indent(level) << std::format("mov byte [rbx], {}\n", entry.arg);
             break;
         case Op::AddPtr:
@@ -334,12 +311,10 @@ void translate(const std::vector<IREntry>& IR, std::ostream& out)
 
 void emitASM(std::string_view asmString, const std::string& asmPath)
 {
-    //no need to close manually closes when function returns, only when needed before that
     std::ofstream out(asmPath);
     out << asmString;
 }
 
-//TODO: add error checking
 void run(const std::vector<const char*>& args)
 {
     pid_t pid = fork();
@@ -355,7 +330,6 @@ void run(const std::vector<const char*>& args)
 
         execvp(argv[0], argv.data());
 
-        //make error more useful
         perror("execvp failed");
         _exit(1);
     }
@@ -399,17 +373,15 @@ void link(const Options& options)
 
 void cleanUp(const Options& options)
 {
-    if(!options.emitIR){
-        run({"rm",
-             "-rf",
-             options.irPath.c_str() });
+    if(!options.emitIR && !std::filesystem::remove(options.irPath)){
+        std::cerr << "\033[1;31mERROR:\033[0m unable to remove IR file" << std::endl;
     }
-    if(!options.emitASM && !options.debug){
-        run({"rm",
-             "-rf",
-             options.asmPath.c_str() });
+    if(!options.emitASM && !std::filesystem::remove(options.asmPath)){
+        std::cerr << "\033[1;31mERROR:\033[0m unable to remove ASM file" << std::endl;
     }
-    run({"rm", "-rf", options.objPath.c_str() });
+    if(!std::filesystem::remove(options.objPath)){
+        std::cerr << "\033[1;31mERROR:\033[0m unable to remove object file" << std::endl;
+    }
 }
 
 int main(int argc, char *argv[])
@@ -441,16 +413,10 @@ int main(int argc, char *argv[])
                 //make sure we have a next argument and it is not a flag
                 if(++i < argc && !(argv[i][0] == '-')){
                     std::string outName {argv[i]};
-                    size_t pos = outName.rfind('.');
-                    if(pos == std::string_view::npos || outName.substr(pos) == ".out"){
-                        options.outputFile = outName;
-                        options.asmPath = outName + ".s";
-                        options.objPath = outName + ".o";
-                        options.irPath  = outName + ".ir";
-                    } else {
-                        std::cerr << "\033[1;31mERROR:\033[0m Incorrect output file type provided\033[0m" << std::endl;
-                        return 1;
-                    }
+                    options.outputFile = outName;
+                    options.asmPath = outName + ".s";
+                    options.objPath = outName + ".o";
+                    options.irPath  = outName + ".ir";
                 } else {
                     std::cerr << "\033[1;31mERROR:\033[0m No output file provided\033[0m" << std::endl;
                     return 1;
@@ -477,7 +443,6 @@ int main(int argc, char *argv[])
         
     }
 
-    //add more checks if more positional arguments are added
     if (positional.size() > 0 && positional[0].ends_with(".bf")){
         options.inputFile = positional[0];
     } else {
@@ -485,7 +450,6 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    //idk about this
     std::string input{};
     std::ifstream bfFile { options.inputFile };
     if (!bfFile){
@@ -495,10 +459,7 @@ int main(int argc, char *argv[])
     }
 
     readSourceFile(bfFile, input); 
-    //std::cout << "RAW INPUT: \n" << input << '\n';
-
     filter(input); 
-    //std::cout << "FILTERED: \n" << input << '\n';
     
     std::unordered_map<int, int> indexToLoopNumber{};
     if (!validateAndMapBrackets(input, indexToLoopNumber)){
