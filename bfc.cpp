@@ -182,7 +182,7 @@ void peephole(std::vector<IREntry>& IR)
     }
 }
 
-void emitIR(std::vector<IREntry>& IR, std::string irPath)
+void emitIR(const std::vector<IREntry>& IR, std::string irPath)
 {
     int idx {};
     std::string opString {};
@@ -309,7 +309,7 @@ void translate(const std::vector<IREntry>& IR, std::ostream& out)
         << indent(level) << "\nsection .note.GNU-stack noalloc noexec nowrite progbits\n";
 }
 
-void emitASM(std::string_view asmString, const std::string& asmPath)
+void emitASM(const std::string_view& asmString, const std::string& asmPath)
 {
     std::ofstream out(asmPath);
     out << asmString;
