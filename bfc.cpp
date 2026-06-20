@@ -103,20 +103,22 @@ void buildIR(std::vector<IREntry>& IR, std::unordered_map<int, int>& idxToLpNbr,
         // =============================== run merging ===================================
         // maybe factor out into functions
         // treating it this way makes it so if the operations cancel eachother out, no IR is emitted
-       
-        //need % because otherwise if there is more + than TAPE_SIZE it overflows the tape (UB)
+        
+        //maybe % needed here too so we don't add more than 255
+        //when that happens it gives a warning but program still works because wraps in memory
         if (c != '+' && c != '-' && cellCounter != 0){
             if (cellCounter > 0){
-                IR.push_back({Op::AddCell, cellCounter%TAPE_SIZE});
+                IR.push_back({Op::AddCell, cellCounter});
             } else {
-                IR.push_back({Op::SubCell, -cellCounter%TAPE_SIZE});
+                IR.push_back({Op::SubCell, -cellCounter});
             }
             cellCounter = 0;
         }
 
+        //need % because otherwise if there is more + than TAPE_SIZE it overflows the tape (UB)
         if (c != '<' && c != '>' && pointCounter != 0){
             if (pointCounter > 0){
-                IR.push_back({Op::AddPtr, pointCounter%TAPE_SIZE});
+                IR.push_back({Op::AddPtr, pointCounter%TAPE_SIZE}); 
             } else {
                 IR.push_back({Op::SubPtr, -pointCounter%TAPE_SIZE});
             }
