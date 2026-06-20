@@ -19,6 +19,8 @@
 //      add LLVM IR backend
 //      add tests
 
+constexpr int TAPE_SIZE { 30000 };
+
 enum class Op {
     AddCell, 
     SubCell, 
@@ -101,20 +103,22 @@ void buildIR(std::vector<IREntry>& IR, std::unordered_map<int, int>& idxToLpNbr,
         // =============================== run merging ===================================
         // maybe factor out into functions
         // treating it this way makes it so if the operations cancel eachother out, no IR is emitted
+       
+        //need % because otherwise if there is more + than TAPE_SIZE it overflows the tape (UB)
         if (c != '+' && c != '-' && cellCounter != 0){
             if (cellCounter > 0){
-                IR.push_back({Op::AddCell, cellCounter});
+                IR.push_back({Op::AddCell, cellCounter%TAPE_SIZE});
             } else {
-                IR.push_back({Op::SubCell, -cellCounter});
+                IR.push_back({Op::SubCell, -cellCounter%TAPE_SIZE});
             }
             cellCounter = 0;
         }
 
         if (c != '<' && c != '>' && pointCounter != 0){
             if (pointCounter > 0){
-                IR.push_back({Op::AddPtr, pointCounter});
+                IR.push_back({Op::AddPtr, pointCounter%TAPE_SIZE});
             } else {
-                IR.push_back({Op::SubPtr, -pointCounter});
+                IR.push_back({Op::SubPtr, -pointCounter%TAPE_SIZE});
             }
             pointCounter = 0;
         }
@@ -221,7 +225,7 @@ void translate(const std::vector<IREntry>& IR, std::ostream& out)
     out << "bits 64\n"
         << "default rel\n"
         << "section .bss\n"
-        << "buf: resb 30000\n"
+        << std::format("buf: resb {}\n", TAPE_SIZE)
         << "section .text\n"
         << "global main\n\n"
         << "main:\n"
@@ -241,14 +245,14 @@ void translate(const std::vector<IREntry>& IR, std::ostream& out)
             out << indent(level) << std::format("mov byte [rbx], {}\n", entry.arg);
             break;
         case Op::AddPtr:
-            //increment pointer, remember to wrap the 30000
+            //increment pointer, remember to wrap to TAPE_SIZE
             out << indent(level) << std::format("add rbx, {}\n", entry.arg)
                 << indent(level) << "lea rcx, [buf]\n"
                 << indent(level) << "mov rax, rbx\n"
                 << indent(level) << "sub rax, rcx\n"
-                << indent(level) << "cmp rax, 30000\n"
+                << indent(level) << std::format("cmp rax, {}\n", TAPE_SIZE)
                 << indent(level) << std::format("jle .done{}\n", counter)
-                << indent(level) << "sub rbx, 30000\n"
+                << indent(level) << std::format("sub rbx, {}\n", TAPE_SIZE)
                 << indent(level) << std::format(".done{}:\n", counter);
             ++counter;
             break;
@@ -257,7 +261,7 @@ void translate(const std::vector<IREntry>& IR, std::ostream& out)
                 << indent(level) << "lea rcx, [buf]\n"
                 << indent(level) << "cmp rbx, rcx\n"
                 << indent(level) << std::format("jge .done{}\n", counter)
-                << indent(level) << "add rbx, 30000\n"
+                << indent(level) << std::format("add rbx, {}\n", TAPE_SIZE)
                 << indent(level) << std::format(".done{}:\n", counter);
             ++counter;
             break;
