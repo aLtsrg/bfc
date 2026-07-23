@@ -399,6 +399,10 @@ int main(int argc, char *argv[])
     for(int i{1}; i < argc; ++i){
         std::string_view arg {argv[i]};
 
+        /*
+         * TODO: add some logic to collapse flags so something like -aig is possible 
+         * need to disallow -h being collapsed or maybe -o also  
+         */
         if(arg.starts_with('-')){
             if(arg == "-h" || arg == "--help"){
                 std::cout << "  bfc - brainfuck compiler\n"
